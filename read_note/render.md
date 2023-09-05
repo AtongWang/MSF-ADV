@@ -346,7 +346,10 @@ def render_sub(ray_direction, length, vertex, face):
     mesh_ray_intersection = mesh_ray_intersection.cuda()
 ```
 
-以下两行代码计算与3D模型不相交的光线的距离和交点。
+以下两行代码计算与3D模型不相交的光线长度$t$，以及方向向量$d$，生成背景激光雷达点坐标$P'=(d^T * t)^T$
+
+shape: (3,N) * (N,) = (3,N) -> (N,3)
+
 ```python
     bg_ray_distance = length[mask_bg]
     bg_ray_intersection = (ray_direction[mask_bg].t() * length[mask_bg]).t()
@@ -368,10 +371,12 @@ def render_sub(ray_direction, length, vertex, face):
     i = torch.where(condition, mesh_i, torch.ones_like(mesh_i) * 144. / 255.)
 ```
 
+对于存在与Mesh相交的光线点，通过比较光线长度。令这些点的反射强度为`144. / 255.`，
+
 ```python
     ii = torch.cat([i, bg_i], dim=0)
 ```
-将与3D模型相交和不相交的光线的i值合并成一个张量。
+将与3D模型相交和不相交的光线的i值合并成一个张量，形成新的反射强度向量。
 
 ```python
     point_cloud = torch.cat([ray_intersection, ii.reshape(-1, 1)], dim=1)
@@ -495,7 +500,8 @@ def render_div(ray_direction, length, vertex, face, i_final):
 返回点云和其他相关信息。
 
 
-
+> render()点云合成时为集中处理。
+> render_div()点云合成时 mesh相交 与 不相交的数据分开处理，再根据Mask叠加。
 
 
 ### loadmesh函数
@@ -544,7 +550,7 @@ def loadmesh(path, x_of=9, y_of=0, r=0.5):
     rotation = torch.tensor(r.as_matrix(), dtype=torch.float)
     rotation = rotation.cuda()
     vertex = vertex.cuda()
-    vertex = vertex.permute(1, 0)
+    vertex = vertex.permute(1, 0) #转置
     vertex = torch.matmul(rotation, vertex)
     vertex = vertex.permute(1, 0)
 ```
@@ -567,6 +573,27 @@ def loadmesh(path, x_of=9, y_of=0, r=0.5):
 ```
 返回处理后的顶点和面数据。
 
+Note:
+
+>load_mesh 中对 mesh 顶点进行了放缩与旋转操作，为什么对于面的数据直接读取而没有进行相应处理？
+
+在3D图形和计算机图形学中，当对一个物体的顶点进行变换（如平移、旋转或缩放）时，其面的定义（通常由顶点索引组成）不需要改变。这是因为面是由其组成的顶点定义的，而不是由其自身的坐标定义的。
+
+让我们详细解释一下：
+
+1. **顶点的变换**:
+   - 当您对一个物体的顶点进行变换时，您实际上是在改变这些顶点的位置。例如，如果您将一个顶点从`(x, y, z)`移动到`(x+1, y, z)`，那么这个顶点的位置就发生了变化。
+
+2. **面的定义**:
+   - 一个面通常由三个或更多的顶点定义（在三角形的情况下是三个）。这些顶点是通过索引来引用的，而不是通过它们的实际坐标。例如，一个面可能由顶点2、3和4定义，而不是由`(x1, y1, z1)`、`(x2, y2, z2)`和`(x3, y3, z3)`定义。
+
+3. **当顶点变换时发生了什么**:
+   - 当您对顶点进行变换时，这些顶点的坐标会改变，但它们的索引不会。因此，即使顶点2的位置从`(x, y, z)`移动到`(x+1, y, z)`，它仍然被称为顶点2。
+
+4. **面的变换**:
+   - 当您对一个物体的顶点进行变换时，这些变换自动应用于由这些顶点定义的所有面。因为面是由顶点的索引定义的，所以不需要对面本身进行任何变换。只要顶点的位置发生了变化，由这些顶点定义的面的形状和位置也会相应地变化。
+
+因此，在`load_mesh`函数中，对顶点进行了放缩和旋转操作，但没有对面进行相应的处理，这是完全合理的。当顶点的位置改变时，由这些顶点定义的面自动适应这些变化。
 ### savemesh函数
 这个函数用于将修改后的3D模型数据保存回PLY文件。
 
@@ -616,5 +643,3 @@ def local_translate(vertices, vector):
 将`vector`重塑为形状为(1, 3)的张量，并将其加到每个顶点上，然后返回平移后的顶点。
 
 
-
-这就是`loadmesh`、`savemesh`、`local_translate`和`filtermask`函数的详细解释。如果你有任何其他问题或需要进一步的解释，请告诉我。
